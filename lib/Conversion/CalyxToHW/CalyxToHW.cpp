@@ -294,6 +294,7 @@ private:
           wires.append({in.getInput(), writeEn.getInput(), clk.getInput(),
                         reset.getInput(), out, done});
         })
+        .Case([&](SeqMemoryOp op) { convertSeqMemoryOp(op, wires, b); })
         // Unary operqations.
         .Case([&](SliceLibOp op) {
           auto in =
@@ -407,6 +408,56 @@ private:
     }
 
     wires.push_back(done);
+  }
+
+  void convertSeqMemoryOp(SeqMemoryOp op, SmallVectorImpl<Value> &wires,
+                          ImplicitLocOpBuilder &b) const {
+    SmallVector<ReadInOutOp> addrInputs;
+    SmallVector<Value> addresses;
+    addrInputs.reserve(op.getNumDimensions());
+    addresses.reserve(op.getNumDimensions());
+    for (auto addrPort : op.addrPorts()) {
+      auto addr =
+          wireIn(addrPort, op.instanceName(), op.portName(addrPort), b);
+      addrInputs.push_back(addr);
+      addresses.push_back(addr);
+    }
+
+    auto clk = wireIn(op.clk(), op.instanceName(), op.portName(op.clk()), b);
+    auto reset =
+        wireIn(op.reset(), op.instanceName(), op.portName(op.reset()), b);
+    auto contentEn = wireIn(op.contentEn(), op.instanceName(),
+                            op.portName(op.contentEn()), b);
+    auto writeEn =
+        wireIn(op.writeEn(), op.instanceName(), op.portName(op.writeEn()), b);
+    auto writeData = wireIn(op.writeData(), op.instanceName(),
+                            op.portName(op.writeData()), b);
+
+    SmallVector<int64_t> shape;
+    shape.reserve(op.getSizes().size());
+    for (auto attr : op.getSizes())
+      shape.push_back(cast<IntegerAttr>(attr).getInt());
+
+    auto seqClk = seq::ToClockOp::create(b, clk);
+    auto elementType = IntegerType::get(op.getContext(), op.getWidth());
+    auto hlmem = seq::HLMemOp::create(b, seqClk, reset, op.instanceName().str(),
+                                      shape, elementType);
+    auto readData = seq::ReadPortOp::create(
+        b, hlmem.getHandle(), addresses, contentEn, /*latency=*/1);
+    auto effectiveWriteEn = AndOp::create(b, contentEn, writeEn, false);
+    seq::WritePortOp::create(b, hlmem.getHandle(), addresses, writeData,
+                             effectiveWriteEn, /*latency=*/1);
+
+    auto doneReg =
+        reg(contentEn, seqClk, reset, op.instanceName() + "_done_reg", b);
+    auto readDataOut =
+        wireOut(readData, op.instanceName(), op.portName(op.readData()), b);
+    auto done = wireOut(doneReg, op.instanceName(), op.portName(op.done()), b);
+
+    for (auto addr : addrInputs)
+      wires.push_back(addr.getInput());
+    wires.append({clk.getInput(), reset.getInput(), contentEn.getInput(),
+                  writeEn.getInput(), writeData.getInput(), readDataOut, done});
   }
 
   ReadInOutOp wireIn(Value source, StringRef instanceName, StringRef portName,
