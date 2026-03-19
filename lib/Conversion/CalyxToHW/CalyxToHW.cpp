@@ -417,8 +417,7 @@ private:
     addrInputs.reserve(op.getNumDimensions());
     addresses.reserve(op.getNumDimensions());
     for (auto addrPort : op.addrPorts()) {
-      auto addr =
-          wireIn(addrPort, op.instanceName(), op.portName(addrPort), b);
+      auto addr = wireIn(addrPort, op.instanceName(), op.portName(addrPort), b);
       addrInputs.push_back(addr);
       addresses.push_back(addr);
     }
@@ -442,8 +441,8 @@ private:
     auto elementType = IntegerType::get(op.getContext(), op.getWidth());
     auto hlmem = seq::HLMemOp::create(b, seqClk, reset, op.instanceName().str(),
                                       shape, elementType);
-    auto readData = seq::ReadPortOp::create(
-        b, hlmem.getHandle(), addresses, contentEn, /*latency=*/1);
+    auto readData = seq::ReadPortOp::create(b, hlmem.getHandle(), addresses,
+                                            contentEn, /*latency=*/1);
     auto effectiveWriteEn = AndOp::create(b, contentEn, writeEn, false);
     seq::WritePortOp::create(b, hlmem.getHandle(), addresses, writeData,
                              effectiveWriteEn, /*latency=*/1);
